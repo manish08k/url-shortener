@@ -1,38 +1,57 @@
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import RedirectResponse
-from utils import encode_base62
-from database import save_url, get_url, increment_click
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from utils import encode_base62, decode_base62
+from database import save_url, get_url, increment_click, get_all_urls
+import os
+from pathlib import Path
 
-app = FastAPI()
+BASE_DIR = Path(__file__).parent
+
+app = FastAPI(title="URL Shortener")
+
+# Base URL — reads from env var for GCloud, falls back to localhost
+BASE_URL = os.getenv("BASE_URL", "http://localhost:8000")
+
+
+class ShortenRequest(BaseModel):
+    long_url: str
+
+
+@app.get("/", response_class=HTMLResponse)
+def index():
+    with open(BASE_DIR / "templates" / "index.html") as f:
+        return f.read()
+
 
 @app.post("/shorten")
-def shorten_url(long_url: str):
-    short_id = save_url(long_url)
+def shorten_url(req: ShortenRequest):
+    url = req.long_url.strip()
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    short_id = save_url(url)
     short_code = encode_base62(short_id)
-    return {"short_url": f"http://localhost:8000/{short_code}"}
+    short_url = f"{BASE_URL}/{short_code}"
+    return {"short_url": short_url, "short_code": short_code}
+
+
+@app.get("/api/stats")
+def stats():
+    return get_all_urls()
+
 
 @app.get("/{short_code}")
 def redirect(short_code: str):
     try:
         short_id = decode_base62(short_code)
-    except:
-        raise HTTPException(status_code=404, detail="Invalid URL")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid short code")
 
     data = get_url(short_id)
     if not data:
         raise HTTPException(status_code=404, detail="URL not found")
 
     increment_click(short_id)
-    return RedirectResponse(url=data["url"])
-
-
-# decode function
-import string
-BASE62 = string.ascii_letters + string.digits
-
-def decode_base62(code):
-    base = len(BASE62)
-    num = 0
-    for char in code:
-        num = num * base + BASE62.index(char)
-    return num
+    return RedirectResponse(url=data["url"], status_code=302)
