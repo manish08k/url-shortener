@@ -1,4 +1,4 @@
-# snip/ — URL Shortener
+ URL Shortener
 
 A simple URL shortener built with FastAPI. Runs locally or on Google Cloud Run.
 
